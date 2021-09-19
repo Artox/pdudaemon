@@ -1,37 +1,48 @@
-FROM debian:bullseye-slim
+FROM alpine:3.14 AS rdepends
 
 RUN set -e; \
-	apt-get update; \
-	apt-get dist-upgrade -y; \
-	apt-get install -y \
-		curl \
-		cython3 \
-		git-core \
-		ipmitool \
-		libffi-dev \
-		libhidapi-dev \
-		libssl-dev \
-		libsystemd-dev \
-		libudev-dev \
-		libusb-1.0-0-dev \
-		pkg-config \
-		psmisc \
-		python3-pip \
-		python3-setuptools \
-		python3-libgpiod \
-		python3-usb \
-		python3-wheel \
-		rustc \
-		telnet \
-		snmp; \
-	apt-get clean; \
+	arch=$(cat /etc/apk/arch); \
+	wget https://github.com/Artox/alpine-systemd/releases/download/1/libsystemd-249-r0.$arch.apk; \
+	wget https://github.com/Artox/alpine-python-systemd/releases/download/1/py3-systemd-234-r0.$arch.apk; \
+	apk --allow-untrusted --no-cache add *.apk; \
+	rm -f *.apk; \
 	:
 
-ARG PIP_URI=git+https://github.com/pdudaemon/pdudaemon.git
-RUN pip3 install ${PIP_URI}
+RUN sed -i "s;^#\(.*\)/community;\1/community;g" /etc/apk/repositories
+
+RUN apk --no-cache add \
+	python3 \
+	py3-pexpect \
+	py3-requests \
+	py3-paramiko \
+	py3-pyserial \
+	py3-setuptools \
+	py3-hidapi \
+	py3-snmp \
+	py3-asn1 \
+	py3-usb \
+	py3-libgpiod \
+	py3-ply \
+	py3-pycryptodomex
+
+FROM rdepends AS build
+
+RUN apk add py3-pip
+
+COPY . /work
+WORKDIR /work
+RUN pip3 install --root=/dist .
+
+FROM rdepends AS run
+
+RUN apk add curl ipmitool psmisc
+# TODO: add more runtime dependencies
+
+COPY --from=build /dist /
+
 RUN mkdir -p /etc/pdudaemon
 COPY share/pdudaemon.conf /etc/pdudaemon/
 
-ENTRYPOINT ["/usr/local/bin/pdudaemon"]
+ENTRYPOINT ["/usr/bin/pdudaemon"]
 CMD ["--dbfile=/etc/pdudaemon/db.sqlite"]
 EXPOSE 16421
